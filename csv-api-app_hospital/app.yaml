@@ -1,0 +1,7 @@
+command: ["uvicorn", "data_generator:app", "--host", "0.0.0.0", "--port", "8000"]
+env:
+  - name: STATE_VOLUME
+    valueFrom: state_volume
+  - name: STREAMING_DATA_VOLUME
+    valueFrom: streaming_volume
+  
