@@ -81,7 +81,9 @@ async def generate_csv_stream():
             pending.insert(0, state["current"])
         
         for name in pending:
-            start_row = state["row"] if name == state["current"] else 0
+            OVERLAP = 5             # for data security we go back each time 5 rows -> there will be duplicates but they will be deleted in silver layer 
+
+            start_row = max(0, state["row"] - OVERLAP) if name == state["current"] else 0         # because there might be queues in buffer
             header, rows = await asyncio.to_thread(read_csv, name)
 
             for i in range(start_row, len(rows)):
@@ -89,7 +91,7 @@ async def generate_csv_stream():
 
                 data = dict(zip(header, rows[i]))
                 payload = json.dumps({"file": name, "row": i + 1, **data})    # **data is new format for adding values in format key:value
-                yield f"data: {payload}\n\n"
+                yield f"{payload}\n\n"
                 
                 # updating after adding row
                 state["current"] = name
