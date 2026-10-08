@@ -20,7 +20,7 @@ PAYLOAD_FIELDS = {
     "patient_admission_flag": "admission_flag",
     "patient_satisfaction_score": "satisfaction_score",
     "patient_waittime": "wait_time",
-    "patients_cm": "patients_cm",
+    "patients_cm": "coordinator_manager_flag",
     "doctor_id": "doctor_id",
     "file": "source_file",
     "row": "source_row",
@@ -94,7 +94,7 @@ def patient_silver_clean():
         .withColumn("age", expr("TRY_CAST(age AS DOUBLE)").cast(IntegerType()))
         .withColumn("satisfaction_score", expr("TRY_CAST(satisfaction_score AS DOUBLE)").cast(IntegerType()))
         .withColumn("wait_time", expr("TRY_CAST(wait_time AS DOUBLE)").cast(IntegerType()))
-        .withColumn("patients_cm", expr("TRY_CAST(patients_cm AS DOUBLE)"))
+        .withColumn("coordinator_manager_flag", expr("TRY_CAST(coordinator_manager_flag AS BOOLEAN)"))
         .withColumn("source_row", expr("TRY_CAST(source_row AS INT)"))
         .withColumn(
             "admission_datetime",
