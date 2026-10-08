@@ -32,19 +32,19 @@ import requests
 # COMMAND ----------
 
 # Databricks Workspace Information
-DATABRICKS_WORKSPACE_ID = "7405615123305702" 
-DATABRICKS_WORKSPACE_URL = "https://adb-7405615123305702.2.azuredatabricks.net"
+DATABRICKS_WORKSPACE_ID = "7405618361895520" 
+DATABRICKS_WORKSPACE_URL = "https://adb-7405618361895520.0.azuredatabricks.net"
 DATABRICKS_REGION = "eastus"
 
 # Zerobus Ingest URL is needed for data reception
 ZEROBUS_INGEST_URL = f"https://{DATABRICKS_WORKSPACE_ID}.zerobus.{DATABRICKS_REGION}.azuredatabricks.net"
 
 # Service Princple Authentication
-CLIENT_ID = dbutils.secrets.get(scope="neon", key="client-id-dbr-blech")
-CLIENT_SECRET = dbutils.secrets.get(scope="neon", key="client-secret-dbr-blech")
+CLIENT_ID = dbutils.secrets.get(scope="scope_blech", key="sp-databricks-adls-appid")
+CLIENT_SECRET = dbutils.secrets.get(scope="scope_blech", key="sp-databricks-adls-appkey")
 
 # Table Information
-CATALOG =  "dbr_dev_trial"
+CATALOG =  "dbr_dev"
 SCHEMA = "hospital_bronze"
 TABLE = "patients_bronze"
 
@@ -130,7 +130,7 @@ def get_audience_token() -> str:
 stream = sdk.create_stream(client_id, client_secret, table_properties, options)
 
 headers = {"Authorization": f"Bearer {get_audience_token()}"}
-url = "https://csv-api-app-7405615123305702.2.azure.databricksapps.com/api/stream"
+url = "https://csv-api-app-7405618361895520.0.azure.databricksapps.com/api/stream"
 BATCH_SIZE = 50
 
 items = []
