@@ -1,0 +1,24 @@
+name: Pipeline tests
+
+on:
+  workflow_dispatch: 
+  push:
+    branches: [main]     
+
+jobs:
+  pytest:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-java@v6
+        with:
+          distribution: temurin
+          java-version: "21"
+
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.12"
+      - run: pip install "pyspark>=4.0,<4.1" pytest
+      - run: python -m pytest -v
