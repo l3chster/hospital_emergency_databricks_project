@@ -1,179 +1,188 @@
-import builtins
-import json
-import sys
-import types
 from datetime import datetime
-from importlib import import_module
-from pathlib import Path
-
+import json
 import pytest
-import pyspark
-from pyspark.sql import SparkSession
+from transformations.src.visits_enriched import transform_visits_enriched
+from transformations.src.coordinator_impact import transform_coordinator_impact
+from transformations.src.patient_silver import transform_patient_silver
 
-CATALOG = "test_catalog"
-PROJEKT = Path(__file__).resolve().parents[1]   # folder hospital_ingestion_pipeline
+patient_schema = (
+    "visit_id string, admission_datetime timestamp, age int, gender string, race string, "
+    "admission_flag boolean, satisfaction_score int, wait_time int, department_referral string, "
+    "coordinator_manager_flag boolean, doctor_id string"
+)
 
-
-# ---------- PRZYGOTOWANIE (robi się raz, przed testami) ----------
-
-@pytest.fixture(scope="session")
-def spark():
-    # 1. Lokalny Spark (w CI nie ma Databricks)
-    session = SparkSession.builder.master("local[1]").getOrCreate()
-
-    # 2. Nazwa katalogu, której używają transformacje
-    session.conf.set("hospital.ingestion.catalog_name", CATALOG)
-
-    # 3. Pliki z transformations/ używają zmiennej `spark` bez jej tworzenia
-    builtins.spark = session
-
-    # 4. Atrapy dekoratorów @dp.view itd. (zamieniają je na "nic nie rób")
-    dp = types.ModuleType("pyspark.pipelines")
-
-    def nic_nie_rob(*args, **kwargs):
-        if len(args) == 1 and callable(args[0]) and not kwargs:
-            return args[0]          # użyte jako @dp.view
-        return lambda fn: fn        # użyte jako @dp.view(name="x")
-
-    for nazwa in ["view", "table", "materialized_view", "expect_or_drop", "expect_all"]:
-        setattr(dp, nazwa, nic_nie_rob)
-    for nazwa in ["create_streaming_table", "create_auto_cdc_flow"]:
-        setattr(dp, nazwa, lambda *a, **k: None)
-
-    sys.modules["pyspark.pipelines"] = dp
-    pyspark.pipelines = dp
-
-    # 5. Pozwala robić import_module("visits_enriched_gold") itd.
-    sys.path.insert(0, str(PROJEKT / "transformations"))
-
-    return session
+doctor_schema = (
+    "doctor_id string, doctor_first_name string, doctor_last_name string, department string, "
+    "subspecialty string, university string, years_of_experience int"
+)
 
 
-def podmien_tabele(monkeypatch, czytnik, tabele):
-    """Sprawia, że czytnik.table(nazwa) zwraca nasze dane testowe."""
-    monkeypatch.setattr(type(czytnik), "table", lambda self, nazwa: tabele[nazwa])
+def _patient(visit_id="v1", age=30, wait_time=10, doctor_id="DOC-1"):
+    return (
+        visit_id, datetime(2024, 1, 15, 8, 30), age, "female", "White", True,
+        7, wait_time, "Cardiology", False, doctor_id,
+    )
 
 
-# ---------- TEST 1 ----------
+def _doctor(years=10):
+    return ("DOC-1", "Jane", "Doe", "Cardiology", "Heart", "MIT", years)
 
-def test_visits_enriched(spark, monkeypatch):
-    pacjenci = spark.createDataFrame([
-        {   # dziecko, lekarz istnieje, brak skierowania
-            "visit_id": "v-child",
-            "admission_datetime": datetime(2024, 1, 15, 8, 30, 0),
-            "age": 17, "gender": "female", "race": "White",
-            "admission_flag": True, "satisfaction_score": 8, "wait_time": 15,
-            "department_referral": None, "coordinator_manager_flag": True,
-            "doctor_id": "DOC-1",
+
+def _bronze(spark, **overrides):   
+    """Creates bronze DF with VARIANT column; skip test, when spark does not support VARIANT."""
+    
+    payload = {
+        "patient_id": "P1", "patient_admission_date": "15-01-2024 08:30",
+        "patient_first_inital": "ab", "patient_last_name": "SMITH",
+        "patient_gender": "Female", "patient_age": "41", "patient_race": "N/A",
+        "department_referral": "cardiology", "patient_admission_flag": "Y",
+        "patient_satisfaction_score": "8", "patient_waittime": "12",
+        "patients_cm": "true", "doctor_id": "DOC-1", "file": "visits.csv", "row": "3",
+    }
+    payload.update(overrides)
+    try:           # dataframe with one row and 2 columns
+        df = (
+            spark.createDataFrame(
+                [(json.dumps(payload), "2024-01-15 09:00:00")],
+                ["payload_json", "timestamp_bronze"],
+            )
+            .selectExpr("parse_json(payload_json) AS payload", "timestamp_bronze")
+        )
+        df.collect()
+    except Exception:
+        pytest.skip("parse_json / VARIANT unavailable in this spark version")
+    return df
+
+
+# TEST 1: Visits Enriched 
+
+def test_visits_enriched(spark):
+    patients = spark.createDataFrame([
+        {
+            "visit_id": "v-child", "admission_datetime": datetime(2024, 1, 15, 8, 30, 0),
+            "age": 17, "gender": "female", "race": "White", "admission_flag": True,
+            "satisfaction_score": 8, "wait_time": 15, "department_referral": None,
+            "coordinator_manager_flag": True, "doctor_id": "DOC-1",
         },
-        {   # senior, lekarza nie ma w tabeli lekarzy
-            "visit_id": "v-unknown-doc",
-            "admission_datetime": datetime(2024, 1, 15, 22, 0, 0),
-            "age": 70, "gender": "male", "race": "Black",
-            "admission_flag": False, "satisfaction_score": 4, "wait_time": 50,
-            "department_referral": "Cardiology", "coordinator_manager_flag": False,
-            "doctor_id": "DOC-MISSING",
+        {
+            "visit_id": "v-unknown-doc", "admission_datetime": datetime(2024, 1, 15, 22, 0, 0),
+            "age": 70, "gender": "male", "race": "Black", "admission_flag": False,
+            "satisfaction_score": 4, "wait_time": 50, "department_referral": "Cardiology",
+            "coordinator_manager_flag": False, "doctor_id": "DOC-MISSING",
         },
     ])
-    lekarze = spark.createDataFrame([{
+    doctors = spark.createDataFrame([{
         "doctor_id": "DOC-1", "doctor_first_name": "Jane", "doctor_last_name": "Doe",
         "department": "Cardiology", "subspecialty": "Heart", "university": "MIT",
         "years_of_experience": 16,
     }])
 
-    podmien_tabele(monkeypatch, spark.read, {
-        f"{CATALOG}.hospital_silver.patient_streaming_silver": pacjenci,
-        f"{CATALOG}.hospital_silver.doctors_silver": lekarze,
-    })
+    rows = {r.visit_id: r.asDict() for r in transform_visits_enriched(patients, doctors).collect()}
 
-    wynik = import_module("visits_enriched_gold").visits_enriched()
-    wiersze = {r.visit_id: r.asDict() for r in wynik.collect()}
+    child = rows["v-child"]    # child is id of child visit
+    assert child["department_referral"] == "No referral"
+    assert child["age_group"] == "0-17"
+    assert child["wait_bucket_in_mins"] == "00-15"
+    assert child["experience_bucket_in_years"] == "16+"
+    assert child["coordinator_involved"] == 1
+    assert child["doctor_first_name"] == "Jane"
 
-    dziecko = wiersze["v-child"]
-    assert dziecko["department_referral"] == "No referral"
-    assert dziecko["age_group"] == "0-17"
-    assert dziecko["wait_bucket_in_mins"] == "00-15"
-    assert dziecko["experience_bucket_in_years"] == "16+"
-    assert dziecko["coordinator_involved"] == 1
-    assert dziecko["doctor_first_name"] == "Jane"
-
-    brak = wiersze["v-unknown-doc"]
-    assert brak["doctor_first_name"] is None
-    assert brak["age_group"] == "65+"
-    assert brak["wait_bucket_in_mins"] == "46+"
-    assert brak["experience_bucket_in_years"] is None
+    no_doctor = rows["v-unknown-doc"]    # no_doctor is id of patient with wrong doctor id
+    assert no_doctor["doctor_first_name"] is None
+    assert no_doctor["age_group"] == "65+"
+    assert no_doctor["wait_bucket_in_mins"] == "46+"
+    assert no_doctor["experience_bucket_in_years"] is None
 
 
-# ---------- TEST 2 ----------
+@pytest.mark.parametrize("age,expected", [
+    (17, "0-17"), (18, "18-39"), (39, "18-39"), (40, "40-64"), (64, "40-64"), (65, "65+"), (None, None),
+])
+def test_visits_enriched_age_group_boundaries(spark, age, expected):
+    patients = spark.createDataFrame([_patient(age=age)], patient_schema)
+    doctors = spark.createDataFrame([_doctor()], doctor_schema)
+    output = transform_visits_enriched(patients, doctors).collect()[0]
+    assert output.age_group == expected
 
-def test_coordinator_impact(spark, monkeypatch):
-    wizyty = spark.createDataFrame(
-        [
-            ("40-64", True,  10, 8, True),
-            ("40-64", False, 30, 5, False),
-            ("40-64", None,  40, 4, False),
-        ],
+
+@pytest.mark.parametrize("wait,expected", [
+    (0, "00-15"), (15, "00-15"), (16, "16-30"), (30, "16-30"), (31, "31-45"), (45, "31-45"), (46, "46+"),
+])
+def test_visits_enriched_wait_bucket_boundaries(spark, wait, expected):
+    patients = spark.createDataFrame([_patient(wait_time=wait)], patient_schema)
+    doctors = spark.createDataFrame([_doctor()], doctor_schema)
+    output = transform_visits_enriched(patients, doctors).collect()[0]
+    assert output.wait_bucket_in_mins == expected
+
+
+def test_visits_enriched_does_not_duplicate_visits(spark):
+    """Left join test"""
+    patients = spark.createDataFrame([_patient("v1"), _patient("v2")], patient_schema)
+    doctors = spark.createDataFrame([_doctor()], doctor_schema)
+    assert transform_visits_enriched(patients, doctors).count() == 2
+
+
+# TEST 2: Coordinator Impact
+
+def test_coordinator_impact(spark):
+    visits = spark.createDataFrame(
+        [("40-64", True, 10, 8, True), ("40-64", False, 30, 5, False), ("40-64", None, 40, 4, False)],
         "age_group string, coordinator_involved boolean, wait_time int, "
         "satisfaction_score int, admission_flag boolean",
     )
+    rows = {(r.age_group, r.coordinator): r for r in transform_coordinator_impact(visits).collect()}
 
-    podmien_tabele(monkeypatch, spark.read, {
-        f"{CATALOG}.hospital_gold.visits_enriched": wizyty,
-    })
-
-    wynik = import_module("coordinator_impact").coordinator_impact()
-    wiersze = {(r.age_group, r.coordinator): r for r in wynik.collect()}
-
-    z = wiersze[("40-64", "with_coordinator")]
-    bez = wiersze[("40-64", "without_coordinator")]
-
-    assert z.visits == 1
-    assert z.avg_wait_time == 10.0
-    assert bez.visits == 2            # False i NULL liczą się jako "bez"
-    assert bez.avg_wait_time == 35.0
+    with_cord = rows[("40-64", "with_coordinator")]
+    without_cord = rows[("40-64", "without_coordinator")]
+    assert with_cord.visits == 1
+    assert with_cord.avg_wait_time == 10.0
+    assert without_cord.visits == 2  # False and NULL count as 2
+    assert without_cord.avg_wait_time == 35.0
 
 
-# ---------- TEST 3 ----------
+def test_coordinator_impact_groups_by_age_group(spark):
+    visits = spark.createDataFrame(
+        [("0-17", True, 10, 8, True), ("65+", True, 20, 6, False)],
+        "age_group string, coordinator_involved boolean, wait_time int, "
+        "satisfaction_score int, admission_flag boolean",
+    )
+    rows = {(r.age_group, r.coordinator) for r in transform_coordinator_impact(visits).collect()}
+    assert rows == {("0-17", "with_coordinator"), ("65+", "with_coordinator")}
 
-def test_patient_silver(spark, monkeypatch):
-    dane = {
-        "patient_id": "P1",
-        "patient_admission_date": "15-01-2024 08:30",
-        "patient_first_inital": "ab",
-        "patient_last_name": "SMITH",
-        "patient_gender": "Female",
-        "patient_age": "41",
-        "patient_race": "N/A",
-        "department_referral": "cardiology",
-        "patient_admission_flag": "Y",
-        "patient_satisfaction_score": "8",
-        "patient_waittime": "12",
-        "patients_cm": "true",
-        "doctor_id": "DOC-1",
-        "file": "visits.csv",
-        "row": "3",
-    }
 
-    try:
-        bronze = spark.createDataFrame(
-            [(json.dumps(dane), "2024-01-15 09:00:00")],
-            ["payload_json", "timestamp_bronze"],
-        ).selectExpr("parse_json(payload_json) AS payload", "timestamp_bronze")
-        bronze.collect()
-    except Exception:
-        pytest.skip("parse_json / VARIANT niedostępne")
+# TEST 3: Patients Bronze to Silver
 
-    podmien_tabele(monkeypatch, spark.readStream, {"x": None})
-    monkeypatch.setattr(type(spark.readStream), "table", lambda self, nazwa: bronze)
+def test_patient_silver(spark):
+    row = transform_patient_silver(_bronze(spark)).collect()[0]
 
-    wiersz = import_module("patients_bronze_to_silver").patient_silver_clean().collect()[0]
+    assert row.gender == "female"
+    assert row.admission_flag is True
+    assert row.first_initial == "A"
+    assert row.last_name == "Smith"
+    assert row.race is None
+    assert row.department_referral == "Cardiology"
+    assert row.age == 41
+    assert row.admission_datetime is not None
+    assert len(row.visit_id) == 64
 
-    assert wiersz.gender == "female"
-    assert wiersz.admission_flag is True
-    assert wiersz.first_initial == "A"
-    assert wiersz.last_name == "Smith"
-    assert wiersz.race is None
-    assert wiersz.department_referral == "Cardiology"
-    assert wiersz.age == 41
-    assert wiersz.admission_datetime is not None
-    assert len(wiersz.visit_id) == 64
+
+def test_patient_silver_admission_flag_no(spark):
+    row = transform_patient_silver(_bronze(spark, patient_admission_flag="N")).collect()[0]
+    assert row.admission_flag is False
+
+
+def test_patient_silver_bad_values_become_null(spark):
+    """Wrong date and age can not influence the pipeline"""
+    row = transform_patient_silver(
+        _bronze(spark, patient_admission_date="not-a-date", patient_age="abc")
+    ).collect()[0]
+    assert row.admission_datetime is None
+    assert row.age is None
+
+
+def test_patient_silver_visit_id_is_deterministic(spark):
+    a = transform_patient_silver(_bronze(spark)).collect()[0].visit_id
+    b = transform_patient_silver(_bronze(spark)).collect()[0].visit_id   
+    c = transform_patient_silver(_bronze(spark, patient_id="P2")).collect()[0].visit_id
+
+    assert a == b   
+    assert a != c   
