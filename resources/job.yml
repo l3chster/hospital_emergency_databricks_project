@@ -1,0 +1,43 @@
+resources:
+  jobs:
+    hospital_ingest_and_refresh:
+      name: hospital_ingest_and_refresh
+      max_concurrent_runs: 1
+      queue:
+        enabled: true
+      parameters:
+        - name: catalog_name
+          default: ${var.catalog_name}
+        - name: workspace_url
+          default: ${var.workspace_url}
+        - name: zerobus_workspace_id
+          default: ${var.zerobus_workspace_id}
+        - name: zerobus_region
+          default: ${var.zerobus_region}
+        - name: csv_api_app_name
+          default: ${var.csv_api_app_name}
+        - name: csv_api_app_url
+          default: ${var.csv_api_app_url}
+      tasks:
+        - task_key: external_table_connection
+          environment_key: default
+          notebook_task:
+            notebook_path: ../EXTERNAL_TABLE_CONNECTION.py
+        - task_key: zerobus_patients
+          environment_key: default
+          notebook_task:
+            notebook_path: ../ZEROBUS_patients_ingest.py
+        - task_key: run_pipeline
+          depends_on:
+            - task_key: external_table_connection
+            - task_key: zerobus_patients
+          pipeline_task:
+            pipeline_id: ${resources.pipelines.hospital_ingestion_pipeline.id}
+      environments:
+        - environment_key: default
+          spec:
+            environment_version: "4"
+            dependencies:
+              - databricks-zerobus-ingest-sdk
+              - databricks-sdk
+              - requests

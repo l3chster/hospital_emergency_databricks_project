@@ -1,0 +1,104 @@
+name: Deploy Databricks bundle
+
+on:
+  workflow_dispatch:
+    inputs:
+      target:
+        description: Bundle target
+        required: true
+        type: choice
+        options:
+          - dev
+          - prod
+        default: dev
+
+concurrency:
+  group: databricks-deploy-${{ inputs.target }}
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    environment: ${{ inputs.target }}
+    env:
+      DATABRICKS_HOST: ${{ vars.DATABRICKS_HOST }}
+      DATABRICKS_CLIENT_ID: ${{ secrets.DATABRICKS_CLIENT_ID }}
+      DATABRICKS_CLIENT_SECRET: ${{ secrets.DATABRICKS_CLIENT_SECRET }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Check required environment config
+        env:
+          TARGET: ${{ inputs.target }}
+          CATALOG_NAME: ${{ vars.CATALOG_NAME }}
+          ZEROBUS_WORKSPACE_ID: ${{ vars.ZEROBUS_WORKSPACE_ID }}
+          ZEROBUS_REGION: ${{ vars.ZEROBUS_REGION }}
+          CSV_API_APP_NAME: ${{ vars.CSV_API_APP_NAME }}
+          CSV_API_APP_URL: ${{ vars.CSV_API_APP_URL }}
+        run: |
+          set -euo pipefail
+          if [ -z "${DATABRICKS_HOST}" ] || [ -z "${DATABRICKS_CLIENT_ID}" ] || [ -z "${DATABRICKS_CLIENT_SECRET}" ]; then
+            echo "Set DATABRICKS_HOST (variable) and DATABRICKS_CLIENT_ID / DATABRICKS_CLIENT_SECRET (secrets) on GitHub Environment '${TARGET}'."
+            exit 1
+          fi
+          if [ "${TARGET}" = "prod" ]; then
+            missing=0
+            for name in CATALOG_NAME ZEROBUS_WORKSPACE_ID ZEROBUS_REGION CSV_API_APP_NAME; do
+              if [ -z "${!name}" ]; then
+                echo "Missing GitHub Environment variable ${name} for prod."
+                missing=1
+              fi
+            done
+            if [ "${missing}" -ne 0 ]; then
+              exit 1
+            fi
+          fi
+
+      - uses: databricks/setup-cli@main
+
+      - name: Validate bundle
+        env:
+          TARGET: ${{ inputs.target }}
+          CATALOG_NAME: ${{ vars.CATALOG_NAME }}
+          ZEROBUS_WORKSPACE_ID: ${{ vars.ZEROBUS_WORKSPACE_ID }}
+          ZEROBUS_REGION: ${{ vars.ZEROBUS_REGION }}
+          CSV_API_APP_NAME: ${{ vars.CSV_API_APP_NAME }}
+          CSV_API_APP_URL: ${{ vars.CSV_API_APP_URL }}
+        run: |
+          set -euo pipefail
+          extra=()
+          if [ "${TARGET}" = "prod" ]; then
+            extra+=(
+              --var "workspace_url=${DATABRICKS_HOST}"
+              --var "catalog_name=${CATALOG_NAME}"
+              --var "zerobus_workspace_id=${ZEROBUS_WORKSPACE_ID}"
+              --var "zerobus_region=${ZEROBUS_REGION}"
+              --var "csv_api_app_name=${CSV_API_APP_NAME}"
+              --var "csv_api_app_url=${CSV_API_APP_URL}"
+            )
+          fi
+          databricks bundle validate -t "${TARGET}" "${extra[@]}"
+
+      - name: Deploy bundle
+        env:
+          TARGET: ${{ inputs.target }}
+          CATALOG_NAME: ${{ vars.CATALOG_NAME }}
+          ZEROBUS_WORKSPACE_ID: ${{ vars.ZEROBUS_WORKSPACE_ID }}
+          ZEROBUS_REGION: ${{ vars.ZEROBUS_REGION }}
+          CSV_API_APP_NAME: ${{ vars.CSV_API_APP_NAME }}
+          CSV_API_APP_URL: ${{ vars.CSV_API_APP_URL }}
+        run: |
+          set -euo pipefail
+          extra=()
+          if [ "${TARGET}" = "prod" ]; then
+            extra+=(
+              --var "workspace_url=${DATABRICKS_HOST}"
+              --var "catalog_name=${CATALOG_NAME}"
+              --var "zerobus_workspace_id=${ZEROBUS_WORKSPACE_ID}"
+              --var "zerobus_region=${ZEROBUS_REGION}"
+              --var "csv_api_app_name=${CSV_API_APP_NAME}"
+              --var "csv_api_app_url=${CSV_API_APP_URL}"
+            )
+          fi
+          databricks bundle deploy -t "${TARGET}" "${extra[@]}"
+          echo "Deploy finished. Job hospital_ingest_and_refresh was not started."

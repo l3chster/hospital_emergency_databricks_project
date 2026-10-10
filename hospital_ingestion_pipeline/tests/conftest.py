@@ -8,7 +8,7 @@ from pyspark.sql import SparkSession
 # creating testing environment
 @pytest.fixture(scope="session")
 def spark():
-    """Lokalna sesja Sparka na czas całej sesji testowej."""
+    """Local Spark session for the entire test session."""
 
     if os.environ.get("DATABRICKS_RUNTIME_VERSION"):
         # Databricks uses existing version

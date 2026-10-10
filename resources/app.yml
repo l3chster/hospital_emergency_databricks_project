@@ -1,0 +1,17 @@
+resources:
+  apps:
+    csv_api_app:
+      name: ${var.csv_api_app_name}
+      description: Streams hospital CSV rows for ZeroBus ingest
+      source_code_path: ../csv-api-app_hospital
+      resources:
+        - name: state_volume
+          description: Stream progress state
+          volume:
+            name: ${var.catalog_name}.${resources.schemas.hospital_bronze.name}.${resources.volumes.csv_api_state.name}
+            permission: CAN_WRITE
+        - name: streaming_volume
+          description: Incoming CSV files
+          volume:
+            name: ${var.catalog_name}.${resources.schemas.hospital_bronze.name}.${resources.volumes.csv_streaming.name}
+            permission: CAN_READ

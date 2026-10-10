@@ -1,0 +1,28 @@
+resources:
+  schemas:
+    hospital_bronze:
+      name: hospital_bronze
+      catalog_name: ${var.catalog_name}
+      comment: Bronze hospital landing tables
+    hospital_silver:
+      name: hospital_silver
+      catalog_name: ${var.catalog_name}
+      comment: Silver cleaned hospital tables
+    hospital_gold:
+      name: hospital_gold
+      catalog_name: ${var.catalog_name}
+      comment: Gold hospital aggregates
+
+  volumes:
+    csv_api_state:
+      name: _state
+      catalog_name: ${var.catalog_name}
+      schema_name: ${resources.schemas.hospital_bronze.name}
+      volume_type: MANAGED
+      comment: Stream progress for csv-api-app
+    csv_streaming:
+      name: streaming_data
+      catalog_name: ${var.catalog_name}
+      schema_name: ${resources.schemas.hospital_bronze.name}
+      volume_type: MANAGED
+      comment: Incoming CSV files for csv-api-app

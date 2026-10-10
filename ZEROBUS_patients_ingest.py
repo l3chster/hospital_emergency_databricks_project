@@ -19,7 +19,7 @@
 import json
 import logging
 from zerobus.sdk.sync import ZerobusSdk
-from zerobus.sdk.shared import RecordType, StreamConfigurationOptions, TableProperties, ZerobusException 
+from zerobus.sdk.shared import RecordType, StreamConfigurationOptions, TableProperties, ZerobusException
 from databricks.sdk import WorkspaceClient
 from datetime import datetime, timezone
 import requests
@@ -31,36 +31,49 @@ import requests
 
 # COMMAND ----------
 
-# Databricks Workspace Information
-DATABRICKS_WORKSPACE_ID = "7405618361895520" 
-DATABRICKS_WORKSPACE_URL = "https://adb-7405618361895520.0.azuredatabricks.net"
-DATABRICKS_REGION = "eastus"
+def _param(name):
+    try:
+        val = dbutils.widgets.get(name)
+        if val:
+            return val.strip()
+    except Exception:
+        pass
+    raise ValueError(f"Brak wymaganego parametru: '{name}'. Przekaż go przez Job lub utwórz widget.")
 
-# Zerobus Ingest URL is needed for data reception
-ZEROBUS_INGEST_URL = f"https://{DATABRICKS_WORKSPACE_ID}.zerobus.{DATABRICKS_REGION}.azuredatabricks.net"
 
-# Service Princple Authentication
-CLIENT_ID = dbutils.secrets.get(scope="scope_blech", key="sp-databricks-adls-appid")
-CLIENT_SECRET = dbutils.secrets.get(scope="scope_blech", key="sp-databricks-adls-appkey")
-
-# Table Information
-CATALOG =  "dbr_dev"
+DATABRICKS_WORKSPACE_ID = _param("zerobus_workspace_id")
+DATABRICKS_WORKSPACE_URL = _param("workspace_url").rstrip("/")
+DATABRICKS_REGION = _param("zerobus_region")
+APP_NAME = _param("csv_api_app_name")
+CATALOG = _param("catalog_name")
 SCHEMA = "hospital_bronze"
 TABLE = "patients_bronze"
 
+ZEROBUS_INGEST_URL = (
+    f"https://{DATABRICKS_WORKSPACE_ID}.zerobus.{DATABRICKS_REGION}.azuredatabricks.net"
+)
+
+csv_api_app_url = _param("csv_api_app_url")    
+
+CLIENT_ID = dbutils.secrets.get(scope="scope_blech", key="sp-databricks-adls-appid")
+CLIENT_SECRET = dbutils.secrets.get(scope="scope_blech", key="sp-databricks-adls-appkey")
+
 # COMMAND ----------
 
+spark.sql(f"CREATE SCHEMA IF NOT EXISTS {CATALOG}.{SCHEMA}")
+spark.sql(f"CREATE SCHEMA IF NOT EXISTS {CATALOG}.hospital_silver")
+spark.sql(f"CREATE SCHEMA IF NOT EXISTS {CATALOG}.hospital_gold")
+
 spark.sql(f"""
-        CREATE TABLE IF NOT EXISTS {CATALOG}.{SCHEMA}.{TABLE} 
-        (        
-        payload VARIANT, 
-        timestamp_bronze STRING       
+        CREATE TABLE IF NOT EXISTS {CATALOG}.{SCHEMA}.{TABLE}
+        (
+        payload VARIANT,
+        timestamp_bronze STRING
         )
         """)
 
 # COMMAND ----------
 
-# Granting service principal required permissions to the table.
 spark.sql(f"GRANT USE CATALOG ON CATALOG {CATALOG} TO " + "`" + CLIENT_ID + "`;").collect()
 spark.sql(f"GRANT USE SCHEMA ON SCHEMA {CATALOG}.{SCHEMA} TO " + "`" + CLIENT_ID + "`;").collect()
 spark.sql(f"GRANT MODIFY, SELECT ON TABLE {CATALOG}.{SCHEMA}.{TABLE} TO " + "`" + CLIENT_ID + "`;").collect()
@@ -72,13 +85,11 @@ spark.sql(f"GRANT MODIFY, SELECT ON TABLE {CATALOG}.{SCHEMA}.{TABLE} TO " + "`" 
 
 # COMMAND ----------
 
-# Configure logging 
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s - %(name)s - %(levelname)s - %(message)s"
 )
 
-# Configuration
 server_endpoint = ZEROBUS_INGEST_URL
 workspace_url = DATABRICKS_WORKSPACE_URL
 
@@ -86,51 +97,43 @@ table_name = f"{CATALOG}.{SCHEMA}.{TABLE}"
 client_id = CLIENT_ID
 client_secret = CLIENT_SECRET
 
-# Initialize SDK
 sdk = ZerobusSdk(server_endpoint, unity_catalog_url=workspace_url)
-
-# Configure table properties
 table_properties = TableProperties(table_name)
-
-# Configure stream with JSON record type
 options = StreamConfigurationOptions(record_type=RecordType.JSON)
 
 # COMMAND ----------
-
-APP_NAME = "csv-api-app"
 
 w = WorkspaceClient()
 
 def get_audience_token() -> str:
     app_client_id = w.apps.get(APP_NAME).oauth2_app_client_id
-    token_url = f"{DATABRICKS_WORKSPACE_URL.rstrip('/')}/oidc/v1/token"
+    token_url = f"{DATABRICKS_WORKSPACE_URL}/oidc/v1/token"
 
     notebook_token = (
         dbutils.notebook.entry_point.getDbutils()
         .notebook().getContext().apiToken().get()
     )
 
-    data= {
+    data = {
             "grant_type": "urn:ietf:params:oauth:grant-type:token-exchange",
             "subject_token": notebook_token,
             "subject_token_type": "urn:databricks:params:oauth:token-type:personal-access-token",
             "requested_token_type": "urn:ietf:params:oauth:token-type:access_token",
             "scope": "all-apis",
             "audience": app_client_id,
-    }    
+    }
 
-    resp = requests.post(url = token_url, data = data, timeout=10)    
+    resp = requests.post(url=token_url, data=data, timeout=10)
     resp.raise_for_status()
     return resp.json()["access_token"]
 
 
 # COMMAND ----------
 
-# Create stream and start writing data
 stream = sdk.create_stream(client_id, client_secret, table_properties, options)
 
 headers = {"Authorization": f"Bearer {get_audience_token()}"}
-url = "https://csv-api-app-7405618361895520.0.azure.databricksapps.com/api/stream"
+url = csv_api_app_url
 BATCH_SIZE = 50
 
 items = []
@@ -165,8 +168,8 @@ try:
             if len(items) >= BATCH_SIZE:
                 failed_total += send_batch(stream, items)
                 print("Data ingested")
-                items = []    
-    
+                items = []
+
 
 finally:
     try:

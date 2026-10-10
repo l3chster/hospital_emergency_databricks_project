@@ -1,0 +1,12 @@
+resources:
+  pipelines:
+    hospital_ingestion_pipeline:
+      name: hospital_ingestion_pipeline
+      catalog: ${var.catalog_name}
+      serverless: true
+      root_path: ../hospital_ingestion_pipeline
+      configuration:
+        hospital.ingestion.catalog_name: ${var.catalog_name}
+      libraries:
+        - glob:
+            include: ../hospital_ingestion_pipeline/transformations/*.py
