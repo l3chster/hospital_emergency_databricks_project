@@ -24,14 +24,12 @@ targets:
   dev:
     default: true
     mode: development
-    workspace:
-      host: ${var.workspace_url}
+    workspace:      
     variables:
       csv_api_app_url: "https://${var.csv_api_app_name}-${var.zerobus_workspace_id}.0.azure.databricksapps.com/api/stream"
 
   prod:
     mode: production
-    workspace:
-      host: ${var.workspace_url}
+    workspace:      
     variables:      
       csv_api_app_url: "https://${var.csv_api_app_name}-${var.zerobus_workspace_id}.1.azure.databricksapps.com/api/stream"
