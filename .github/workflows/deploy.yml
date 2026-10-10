@@ -33,7 +33,7 @@ jobs:
 
     steps:
       - uses: actions/checkout@v7
-      - uses: databricks/setup-cli@v1.20
+      - uses: databricks/setup-cli@v1.20.0
 
       - name: Validate bundle (Dev)
         run: databricks bundle validate --target dev
@@ -60,7 +60,7 @@ jobs:
 
     steps:
       - uses: actions/checkout@v7
-      - uses: databricks/setup-cli@v1.20
+      - uses: databricks/setup-cli@v1.20.0
 
       - name: Validate bundle (Prod)
         run: databricks bundle validate --target prod
