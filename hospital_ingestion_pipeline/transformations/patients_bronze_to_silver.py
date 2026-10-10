@@ -1,7 +1,7 @@
 from pyspark import pipelines as dp
 from pyspark.sql.functions import (
     coalesce, col, current_timestamp, expr, initcap, lit, lower,
-    substring, try_to_timestamp, upper, when,
+    substring, try_to_timestamp, upper, when, sha2, concat_ws
 )
 from pyspark.sql.types import IntegerType
 
@@ -100,6 +100,10 @@ def patient_silver_clean():
             "admission_datetime",
             coalesce(*[try_to_timestamp(col("admission_datetime"), lit(f)) for f in DATE_FORMATS]),
         )
+        .withColumn(
+            "visit_id",
+            sha2(concat_ws("|", col("patient_id"), col("admission_datetime").cast("string")), 256),
+        )
         .withColumn("bronze_timestamp", try_to_timestamp(col("timestamp_bronze")))
         .drop("timestamp_bronze")
         .withColumn("silver_timestamp", current_timestamp())
@@ -120,7 +124,7 @@ dp.create_streaming_table(
 dp.create_auto_cdc_flow(
     target=f"{catalog_name}.hospital_silver.patient_streaming_silver",
     source="patient_silver_clean",
-    keys=["patient_id"],
+    keys=["visit_id"],
     sequence_by=col("bronze_timestamp"),
     stored_as_scd_type="1",
 )
