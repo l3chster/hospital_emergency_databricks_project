@@ -1,0 +1,21 @@
+name: Pipeline testing
+on: workflow_dispatch
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Get code
+        uses: actions/checkout@v4
+      - name: Install Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+      - name: Install dependencies
+        run: pip install "pyspark>=4.0,<4.1" pytest
+      - name: Run tests
+        run: pytest hospital_ingestion_pipeline/tests -v
