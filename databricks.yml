@@ -8,12 +8,8 @@ variables:
   catalog_name:
     description: Unity Catalog for bronze/silver/gold tables
     default: dbr_dev
-  workspace_url:
-    description: Workspace URL used by ZeroBus OIDC and the ingest SDK
-    default: https://adb-7405618361895520.0.azuredatabricks.net
   zerobus_workspace_id:
     description: Numeric workspace id in the Zerobus ingest hostname
-    default: "7405618361895520"
   zerobus_region:
     description: Azure region segment in the Zerobus ingest hostname
     default: eastus
@@ -21,11 +17,8 @@ variables:
     description: Databricks App name that streams CSV rows
     default: csv-api-app
   csv_api_app_url:
-    description: Full /api/stream URL of the CSV app (leave empty to derive from app name + workspace id)
-    default: https://csv-api-app-7405618361895520.0.azure.databricksapps.com/api/stream
-
-workspace:
-  host: ${var.workspace_url}
+    description: Full /api/stream URL of the CSV app
+    default: "https://${var.csv_api_app_name}-${var.zerobus_workspace_id}.0.azure.databricksapps.com/api/stream"
 
 targets:
   dev:
@@ -34,21 +27,11 @@ targets:
     workspace:
       host: ${var.workspace_url}
     variables:
-      catalog_name: dbr_dev
-      workspace_url: https://adb-7405618361895520.0.azuredatabricks.net
-      zerobus_workspace_id: "7405618361895520"
-      zerobus_region: eastus
-      csv_api_app_name: csv-api-app
-      csv_api_app_url: https://${var.csv_api_app_name}-${var.zerobus_workspace_id}.0.azure.databricksapps.com/api/stream
+      csv_api_app_url: "https://${var.csv_api_app_name}-${var.zerobus_workspace_id}.0.azure.databricksapps.com/api/stream"
 
   prod:
     mode: production
     workspace:
       host: ${var.workspace_url}
-    variables:
-      catalog_name: dbr_dev
-      workspace_url: https://adb-7405604503619901.1.azuredatabricks.net
-      zerobus_workspace_id: "7405604503619901"
-      zerobus_region: eastus
-      csv_api_app_name: csv-api-app-prod
-      csv_api_app_url: https://${var.csv_api_app_name}-${var.zerobus_workspace_id}.1.azure.databricksapps.com/api/stream
+    variables:      
+      csv_api_app_url: "https://${var.csv_api_app_name}-${var.zerobus_workspace_id}.1.azure.databricksapps.com/api/stream"
